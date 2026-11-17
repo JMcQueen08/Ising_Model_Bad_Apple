@@ -1,15 +1,48 @@
 from pathlib import Path
+from math import exp
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FFMpegWriter, FuncAnimation
+from numba import njit
 from scipy.ndimage import (
     distance_transform_edt,
     gaussian_filter,
     sobel,
 )
 from tqdm import tqdm
+
+
+@njit(cache=True)
+def _update_checkerboard(spins, magnetic_field, temperature, random_values, parity, coupling):
+    size = spins.shape[0]
+    neighbour_sum = np.empty(spins.shape, dtype=np.int8)
+
+    for row in range(size):
+        up = row - 1 if row > 0 else size - 1
+        down = row + 1 if row + 1 < size else 0
+        for col in range(size):
+            left = col - 1 if col > 0 else size - 1
+            right = col + 1 if col + 1 < size else 0
+            neighbour_sum[row, col] = (
+                spins[up, col] + spins[down, col] + spins[row, left] + spins[row, right]
+            )
+
+    accepted = 0
+    for row in range(size):
+        for col in range(size):
+            if (row + col) % 2 == parity:
+                delta_energy = 2.0 * spins[row, col] * (
+                    coupling * neighbour_sum[row, col] + magnetic_field[row, col]
+                )
+                if delta_energy <= 0.0 or random_values[row, col] < exp(
+                    -delta_energy / temperature[row, col]
+                ):
+                    spins[row, col] *= -1
+                    accepted += 1
+
+    return accepted
 
 
 class BadAppleIsing:
@@ -144,16 +177,11 @@ class BadAppleIsing:
     def sweep(self):
         accepted = 0
 
-        for mask in (self.black, self.white):
-            neighbour_sum = (np.roll(self.spins, 1, axis=0) + np.roll(self.spins, -1, axis=0) 
-                             + np.roll(self.spins, 1, axis=1) + np.roll(self.spins, -1, axis=1))
-
-            dE = 2.0 * self.spins * (self.J * neighbour_sum + self.H)
-            probability = np.exp(-np.maximum(dE, 0.0) / self.T)
-
-            flip = mask & ((dE <= 0.0) | (self.rng.random((self.N, self.N)) < probability))
-            self.spins[flip] *= -1
-            accepted += np.count_nonzero(flip)
+        for parity in (0, 1):
+            random_values = self.rng.random((self.N, self.N))
+            accepted += _update_checkerboard(
+                self.spins, self.H, self.T, random_values, parity, self.J
+            )
 
         return accepted / (self.N * self.N)
 
@@ -270,11 +298,13 @@ class BadAppleIsing:
 
 if __name__ == "__main__":
     simulation = BadAppleIsing(
-        video_path="bad-apple.mp4", N=500, J=1.0, H_strength=1.75, distance_scale=5.0, T_bulk=1.35, T_edge=2.55,
-        edge_width=5.0, spatial_blur=1.5, temporal_smoothing=0.18, field_spatial_smoothing=0.75,
-        sweeps_per_frame=10, invert_video=False, seed=None)
+        video_path="bad-apple.mp4", N=500, J=1.0, H_strength=1.25, distance_scale=10.0, T_bulk=1.5, T_edge=2.55,
+        edge_width=10.0, spatial_blur=1.5, temporal_smoothing=0.18, field_spatial_smoothing=0.75,
+        sweeps_per_frame=10, invert_video=False, seed=7)
 
-    animation = simulation.run(output_path="larger_ising_bad_apple_full.mp4", output_fps=24, dpi=120)
+    animation = simulation.run(output_path="big_bad_apple_ising.mp4", output_fps=24, dpi=120)
 
 
-# ffmpeg -i "ising_bad_apple_full.mp4" -i "bad-apple.mp4" -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -strict -2 -b:a 192k -shortest "ising_bad_apple_with_audio.mp4"
+# ffmpeg -i "ising_bad_apple_full.mp4" -i "bad-apple.mp4" 
+# -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -strict -2 -b:a 192k -shortest 
+# "ising_bad_apple_with_audio.mp4"
