@@ -270,8 +270,8 @@ class BadAppleIsing:
 
 if __name__ == "__main__":
     simulation = BadAppleIsing(
-        video_path="bad-apple.mp4", N=150, J=1.0, H_strength=1.75, distance_scale=5.0, T_bulk=1.35, T_edge=2.55,
+        video_path="bad-apple.mp4", N=500, J=1.0, H_strength=1.75, distance_scale=5.0, T_bulk=1.35, T_edge=2.55,
         edge_width=5.0, spatial_blur=1.5, temporal_smoothing=0.18, field_spatial_smoothing=0.75,
-        sweeps_per_frame=8, invert_video=False, seed=None)
+        sweeps_per_frame=10, invert_video=False, seed=None)
 
-    animation = simulation.run(output_path="ising_bad_apple_full.mp4", output_fps=24, dpi=120)
+    animation = simulation.run(output_path="larger_ising_bad_apple_full.mp4", output_fps=24, dpi=120)
