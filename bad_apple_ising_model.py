@@ -275,3 +275,6 @@ if __name__ == "__main__":
         sweeps_per_frame=10, invert_video=False, seed=None)
 
     animation = simulation.run(output_path="larger_ising_bad_apple_full.mp4", output_fps=24, dpi=120)
+
+
+# ffmpeg -i "ising_bad_apple_full.mp4" -i "bad-apple.mp4" -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -strict -2 -b:a 192k -shortest "ising_bad_apple_with_audio.mp4"
