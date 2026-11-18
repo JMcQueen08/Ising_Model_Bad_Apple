@@ -1,11 +1,11 @@
-from pathlib import Path
 from math import exp
+from pathlib import Path
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FFMpegWriter, FuncAnimation
-from numba import njit
+from numba import jit
 from scipy.ndimage import (
     distance_transform_edt,
     gaussian_filter,
@@ -14,33 +14,26 @@ from scipy.ndimage import (
 from tqdm import tqdm
 
 
-@njit(cache=True)
+@jit(nopython=True, cache=True)
 def _update_checkerboard(spins, magnetic_field, temperature, random_values, parity, coupling):
     size = spins.shape[0]
-    neighbour_sum = np.empty(spins.shape, dtype=np.int8)
-
-    for row in range(size):
-        up = row - 1 if row > 0 else size - 1
-        down = row + 1 if row + 1 < size else 0
-        for col in range(size):
-            left = col - 1 if col > 0 else size - 1
-            right = col + 1 if col + 1 < size else 0
-            neighbour_sum[row, col] = (
-                spins[up, col] + spins[down, col] + spins[row, left] + spins[row, right]
-            )
 
     accepted = 0
     for row in range(size):
-        for col in range(size):
-            if (row + col) % 2 == parity:
-                delta_energy = 2.0 * spins[row, col] * (
-                    coupling * neighbour_sum[row, col] + magnetic_field[row, col]
-                )
-                if delta_energy <= 0.0 or random_values[row, col] < exp(
-                    -delta_energy / temperature[row, col]
-                ):
-                    spins[row, col] *= -1
-                    accepted += 1
+        up = row - 1 if row > 0 else size - 1
+        down = row + 1 if row + 1 < size else 0
+        first_col = (parity - row) & 1
+        
+        for col in range(first_col, size, 2):
+            left = col - 1 if col > 0 else size - 1
+            right = col + 1 if col + 1 < size else 0
+
+            neighbour_sum = (spins[up, col] + spins[down, col] + spins[row, left] + spins[row, right])
+            delta_energy = 2.0 * spins[row, col] * (coupling * neighbour_sum + magnetic_field[row, col])
+
+            if delta_energy <= 0.0 or random_values[row, col] < exp(-delta_energy / temperature[row, col]):
+                spins[row, col] *= -1
+                accepted += 1
 
     return accepted
 
@@ -54,6 +47,9 @@ class BadAppleIsing:
 
         if initial_sweeps is None:
             initial_sweeps = sweeps_per_frame * 10
+
+        if N <= 0 or N % 2 != 0:
+            raise ValueError("N must be a positive even integer.")
 
         self.video_path = Path(video_path)
         if not self.video_path.exists():
@@ -178,10 +174,8 @@ class BadAppleIsing:
         accepted = 0
 
         for parity in (0, 1):
-            random_values = self.rng.random((self.N, self.N))
-            accepted += _update_checkerboard(
-                self.spins, self.H, self.T, random_values, parity, self.J
-            )
+            random_values = self.rng.random((self.N, self.N), dtype=np.float32)
+            accepted += _update_checkerboard(self.spins, self.H, self.T, random_values, parity, self.J)
 
         return accepted / (self.N * self.N)
 
@@ -263,7 +257,8 @@ class BadAppleIsing:
         self.title.set_text(f"Bad Apple Ising simulation | frame {frame_number + 1}/{self.frame_count} | "
                             f"m = {self.spins.mean():+.3f} | acceptance = {acceptance:.3f}")
 
-        self.update_surfaces()
+        if frame_number % 2 == 0:
+            self.update_surfaces()
 
         return (self.spin_image, self.title, self.temperature_surface, self.field_surface)
 
@@ -271,8 +266,16 @@ class BadAppleIsing:
     def run(self, output_path: str | None = None, output_fps: float | None = None, dpi: int = 120):
         if output_path is not None:
             output_file = Path(output_path).resolve()
-            if output_file == self.video_path.resolve():
-                raise ValueError("output_path must not overwrite the input video.")
+            if output_file == self.video_path.resolve() or output_file.exists():
+                base_file = output_file
+                version = 2
+                while output_file == self.video_path.resolve() or output_file.exists():
+                    output_file = base_file.with_name(
+                        f"{base_file.stem}_V{version}{base_file.suffix}"
+                    )
+                    version += 1
+                print(f"Output path already exists; saving to {output_file}")
+            output_path = str(output_file)
 
         self.initialise_plot()
 
